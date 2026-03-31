@@ -6,7 +6,7 @@ from typing import Any
 from ..config import settings
 from ..schemas import summary_to_dict, validate_summary_payload
 from .llm_summarizer import LLMService
-from .repository import get_message, upsert_summary
+from .repository import get_attachments, get_message, upsert_summary
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,14 @@ class SummaryService:
             raise ValueError('Message not found')
 
         body = row['text_body'] or row['body_preview'] or ''
+        if row['html_body'] and not row['text_body']:
+            body = row['html_body'][:12000]
+
+        attachments = get_attachments(message_id)
+        attach_hint = ', '.join([f"{a['filename']}({a['content_type']})" for a in attachments[:8]])
+        if attach_hint:
+            body += f'\n\n[첨부파일]\n{attach_hint}'
+
         attempt = 0
         last_error: str | None = None
         while attempt < max_attempts:
@@ -29,22 +37,40 @@ class SummaryService:
                 raw = self.llm.summarize_mail(row['subject'], body)
                 validated = validate_summary_payload(raw)
                 normalized = summary_to_dict(validated)
-                upsert_summary(message_id, settings.llm_model, normalized, raw, retry_count=attempt - 1)
+                upsert_summary(
+                    message_id,
+                    settings.llm_model,
+                    normalized,
+                    raw,
+                    retry_count=attempt - 1,
+                    reason='resummarize' if force else 'summarize',
+                )
                 return {'ok': True, 'attempt': attempt, 'summary': normalized}
             except Exception as exc:
                 last_error = str(exc)
-                logger.warning('summarize_message failed: message_id=%s attempt=%s force=%s', message_id, attempt, force)
+                logger.warning('summarize_message failed: message_id=%s attempt=%s force=%s err=%s', message_id, attempt, force, exc)
 
         fallback = {
-            'summary_short': row['body_preview'] or '요약 실패',
+            'summary_short': (row['body_preview'] or '요약 실패')[:120],
             'summary_long': f'LLM 요약 실패로 원문 미리보기를 대신 저장했습니다.\n오류: {last_error}',
             'keywords': [],
-            'risks': [],
-            'action_items': [],
+            'risks': ['요약 실패로 리스크 자동 산출 불가'],
+            'action_items': ['운영자가 수동 검토 필요'],
             'category': '기타',
-            'status': 'triaged',
+            'status': 'flagged',
             'tags': ['요약실패'],
-            'importance_score': 0,
+            'importance_score': 70 if force else 50,
+            'entities_people': [],
+            'entities_orgs': [],
+            'deadlines': [],
+            'numeric_facts': [],
         }
-        upsert_summary(message_id, settings.llm_model, fallback, {'error': last_error}, retry_count=max_attempts)
+        upsert_summary(
+            message_id,
+            settings.llm_model,
+            fallback,
+            {'error': last_error},
+            retry_count=max_attempts,
+            reason='fallback',
+        )
         return {'ok': False, 'attempt': max_attempts, 'error': last_error, 'summary': fallback}

@@ -9,49 +9,61 @@
     </div>
     <div class="row gap12 wrap">
       <a class="btn" href="/download/eml/{{ row.id }}">EML 다운로드</a>
-      <form method="post" action="/actions/summarize/{{ row.id }}">
-        <button class="btn primary" type="submit">요약 생성</button>
-      </form>
-      <form method="post" action="/actions/resummarize/{{ row.id }}">
-        <button class="btn" type="submit">관리자 재요약</button>
+      <form method="post" action="/actions/summarize/{{ row.id }}"><button class="btn primary" type="submit">요약 생성</button></form>
+      <form method="post" action="/actions/resummarize/{{ row.id }}"><button class="btn" type="submit">재요약</button></form>
+      <form method="post" action="/actions/important/{{ row.id }}" class="inline">
+        <input type="hidden" name="enabled" value="{{ 0 if row.is_important else 1 }}" />
+        <button class="btn" type="submit">{{ '중요 해제' if row.is_important else '중요 표시' }}</button>
       </form>
     </div>
   </div>
 </section>
 
+<section class="card">
+  <h3>운영 액션</h3>
+  <div class="row wrap gap12">
+    <form method="post" action="/actions/status/{{ row.id }}" class="inline">
+      <select name="status">{% for s in ['new','reviewed','flagged','archived'] %}<option value="{{ s }}" {% if (row.summary_status or row.status) == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+      <button class="btn" type="submit">상태 변경</button>
+    </form>
+    <form method="post" action="/actions/tag/add/{{ row.id }}" class="inline">
+      <input type="text" name="tag" placeholder="태그 추가" required />
+      <button class="btn" type="submit">태그 추가</button>
+    </form>
+    <form method="post" action="/actions/tag/remove/{{ row.id }}" class="inline">
+      <input type="text" name="tag" placeholder="태그 삭제" required />
+      <button class="btn" type="submit">태그 삭제</button>
+    </form>
+  </div>
+</section>
+
 <section class="grid cols-2 gap16 two-col">
   <div class="card">
-    <h3>요약</h3>
-    <p>{{ row.summary_short or '아직 요약이 없습니다.' }}</p>
+    <h3>요약 (목록용/상세용)</h3>
+    <p><strong>Short:</strong> {{ row.summary_short or '아직 요약이 없습니다.' }}</p>
     <hr />
-    <p class="preline">{{ row.summary_long or '-' }}</p>
+    <p class="preline"><strong>Long:</strong>
+{{ row.summary_long or '-' }}</p>
   </div>
 
   <div class="card">
-    <h3>운영 메타데이터</h3>
+    <h3>요약 메타데이터</h3>
     <p><strong>카테고리:</strong> {{ row.category or '-' }}</p>
     <p><strong>상태:</strong> <span class="badge">{{ row.summary_status or row.status or 'new' }}</span></p>
     <p><strong>중요도:</strong> {{ row.importance_score or '-' }}</p>
+    <p><strong>재시도:</strong> {{ row.retry_count or 0 }}</p>
     <p><strong>Thread Key:</strong> {{ row.thread_key or '-' }}</p>
 
-    <h4>태그</h4>
-    <div class="chips">
-      {% for item in tags %}<span class="chip">{{ item }}</span>{% else %}<span class="muted">없음</span>{% endfor %}
-    </div>
-
-    <h4>키워드</h4>
-    <div class="chips">
-      {% for item in keywords %}<span class="chip">{{ item }}</span>{% else %}<span class="muted">없음</span>{% endfor %}
-    </div>
-
-    <h4>리스크</h4>
+    <h4>태그</h4><div class="chips">{% for item in tags %}<span class="chip">{{ item }}</span>{% else %}<span class="muted">없음</span>{% endfor %}</div>
+    <h4>키워드</h4><div class="chips">{% for item in keywords %}<span class="chip">{{ item }}</span>{% else %}<span class="muted">없음</span>{% endfor %}</div>
+    <h4>리스크</h4><ul>{% for item in risks %}<li>{{ item }}</li>{% else %}<li class="muted">없음</li>{% endfor %}</ul>
+    <h4>액션아이템</h4><ul>{% for item in action_items %}<li>{{ item }}</li>{% else %}<li class="muted">없음</li>{% endfor %}</ul>
+    <h4>인물/조직/일정/수치</h4>
     <ul>
-      {% for item in risks %}<li>{{ item }}</li>{% else %}<li class="muted">없음</li>{% endfor %}
-    </ul>
-
-    <h4>액션아이템</h4>
-    <ul>
-      {% for item in action_items %}<li>{{ item }}</li>{% else %}<li class="muted">없음</li>{% endfor %}
+      <li><strong>인물:</strong> {{ entities_people|join(', ') if entities_people else '-' }}</li>
+      <li><strong>조직:</strong> {{ entities_orgs|join(', ') if entities_orgs else '-' }}</li>
+      <li><strong>일정:</strong> {{ deadlines|join(', ') if deadlines else '-' }}</li>
+      <li><strong>수치:</strong> {{ numeric_facts|join(', ') if numeric_facts else '-' }}</li>
     </ul>
   </div>
 </section>
@@ -59,13 +71,7 @@
 <section class="grid cols-2 gap16 two-col">
   <div class="card">
     <h3>첨부파일</h3>
-    <ul>
-      {% for file in attachments %}
-        <li><a href="/download/attachment/{{ file.id }}">{{ file.filename }}</a> ({{ file.content_type }}, {{ file.file_size }} bytes)</li>
-      {% else %}
-        <li class="muted">첨부 없음</li>
-      {% endfor %}
-    </ul>
+    <ul>{% for file in attachments %}<li><a href="/download/attachment/{{ file.id }}">{{ file.filename }}</a> ({{ file.content_type }}, {{ file.file_size }} bytes{% if file.is_inline %}, inline{% endif %})</li>{% else %}<li class="muted">첨부 없음</li>{% endfor %}</ul>
   </div>
 
   <div class="card">
@@ -79,27 +85,21 @@
     <hr />
     <ul>
       {% for link in links %}
-        <li>[{{ link.link_type }}] <a href="{{ link.url }}" target="_blank">{{ link.title }}</a></li>
-      {% else %}
-        <li class="muted">등록된 링크 없음</li>
-      {% endfor %}
+      <li>
+        [{{ link.link_type }}] <a href="{{ link.url }}" target="_blank">{{ link.title }}</a>
+        <form method="post" action="/actions/delete-link/{{ row.id }}/{{ link.id }}" class="inline"><button class="btn" type="submit">삭제</button></form>
+      </li>
+      {% else %}<li class="muted">등록된 링크 없음</li>{% endfor %}
     </ul>
   </div>
 </section>
 
-<section class="card">
-  <h3>스레드</h3>
-  <ul>
-    {% for item in thread_rows %}
-      <li><a href="/messages/{{ item.id }}">{{ item.subject }}</a> - {{ item.from_email }} - {{ item.sent_at or '-' }} ({{ item.summary_status or 'new' }})</li>
-    {% else %}
-      <li class="muted">스레드 정보 없음</li>
-    {% endfor %}
-  </ul>
+<section class="grid cols-2 gap16 two-col">
+  <div class="card"><h3>스레드 메일 (시간순)</h3><ul>{% for item in thread_rows %}<li><a href="/messages/{{ item.id }}">{{ item.subject }}</a> - {{ item.from_email }} - {{ item.sent_at or '-' }} ({{ item.summary_status or 'new' }})</li>{% else %}<li class="muted">스레드 정보 없음</li>{% endfor %}</ul></div>
+  <div class="card"><h3>관련 메일 (동일 주제)</h3><ul>{% for item in related_rows %}<li><a href="/messages/{{ item.id }}">{{ item.subject }}</a> - {{ item.sent_at or '-' }}</li>{% else %}<li class="muted">관련 메일 없음</li>{% endfor %}</ul></div>
 </section>
 
-<section class="card">
-  <h3>본문 미리보기</h3>
-  <div class="mail-body preline">{{ row.text_body or row.body_preview or '-' }}</div>
-</section>
+<section class="card"><h3>요약 이력</h3><ul>{% for h in history_rows %}<li>{{ h.created_at }} - {{ h.reason }} - {{ h.model_name or '-' }}</li>{% else %}<li class="muted">이력 없음</li>{% endfor %}</ul></section>
+
+<section class="card"><h3>본문 미리보기</h3><div class="mail-body preline">{{ row.text_body or row.body_preview or '-' }}</div></section>
 {% endblock %}

@@ -66,7 +66,11 @@ class LLMService:
   "risks": ["리스크1"],
   "action_items": ["액션1"],
   "category": "운영|품질|일정|보고|보안|고객|기타",
-  "status": "new|triaged|action_required|waiting|closed",
+  "status": "new|reviewed|flagged|archived",
+  "entities_people": ["사람1"],
+  "entities_orgs": ["조직1"],
+  "deadlines": ["2026-04-10 계약 검토"],
+  "numeric_facts": ["예산 3억원"],
   "tags": ["태그1", "태그2"],
   "importance_score": 0
 }}

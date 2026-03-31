@@ -1,36 +1,31 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="card">
-  <h2>Message Review Queue</h2>
+  <h2>메일 운영 큐</h2>
   <form method="get" class="filters row wrap gap12">
-    <input type="text" name="q" value="{{ q }}" placeholder="제목/발신자/본문 검색" />
+    <input type="text" name="q" value="{{ q }}" placeholder="제목/본문 검색" />
+    <input type="text" name="sender" value="{{ sender }}" placeholder="발신자" />
+    <input type="date" name="date_from" value="{{ date_from }}" />
+    <input type="date" name="date_to" value="{{ date_to }}" />
     <input type="text" name="category" value="{{ category }}" placeholder="카테고리" />
     <input type="text" name="tag" value="{{ tag }}" placeholder="태그" />
-    <select name="has_summary">
-      <option value="" {% if not has_summary %}selected{% endif %}>요약 전체</option>
-      <option value="Y" {% if has_summary == 'Y' %}selected{% endif %}>요약 완료</option>
-      <option value="N" {% if has_summary == 'N' %}selected{% endif %}>요약 미완료</option>
-    </select>
-    <select name="status">
-      <option value="" {% if not status %}selected{% endif %}>상태 전체</option>
-      {% for s in ['new','triaged','action_required','waiting','closed'] %}
-      <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
-      {% endfor %}
+    <select name="has_attachment"><option value="" {% if not has_attachment %}selected{% endif %}>첨부 전체</option><option value="Y" {% if has_attachment=='Y' %}selected{% endif %}>첨부 있음</option><option value="N" {% if has_attachment=='N' %}selected{% endif %}>첨부 없음</option></select>
+    <select name="has_summary"><option value="" {% if not has_summary %}selected{% endif %}>요약 전체</option><option value="Y" {% if has_summary == 'Y' %}selected{% endif %}>요약 완료</option><option value="N" {% if has_summary == 'N' %}selected{% endif %}>요약 미완료</option></select>
+    <select name="status"><option value="" {% if not status %}selected{% endif %}>상태 전체</option>{% for s in ['new','reviewed','flagged','archived'] %}<option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    <input type="number" name="importance_min" value="{{ importance_min }}" placeholder="중요도 min" min="0" max="100" />
+    <input type="number" name="importance_max" value="{{ importance_max }}" placeholder="중요도 max" min="0" max="100" />
+    <select name="sort">
+      <option value="latest" {% if sort=='latest' %}selected{% endif %}>최신순</option>
+      <option value="importance_desc" {% if sort=='importance_desc' %}selected{% endif %}>중요도순</option>
+      <option value="summary_failed_desc" {% if sort=='summary_failed_desc' %}selected{% endif %}>요약실패순</option>
     </select>
     <button class="btn primary" type="submit">필터 적용</button>
   </form>
 </section>
 
 <section class="card">
-  <table class="table">
-    <thead>
-      <tr>
-        <th>일시</th>
-        <th>제목/발신자</th>
-        <th>요약</th>
-        <th>메타데이터</th>
-      </tr>
-    </thead>
+  <table class="table compact">
+    <thead><tr><th>일시</th><th>제목/발신자</th><th>목록용 요약</th><th>운영 메타</th></tr></thead>
     <tbody>
       {% for row in rows %}
       <tr>
@@ -41,13 +36,13 @@
         </td>
         <td>{{ row.summary_short or row.body_preview or '-' }}</td>
         <td>
-          <div><span class="badge">{{ row.summary_status or 'new' }}</span></div>
+          <span class="badge">{{ row.summary_status or row.status or 'new' }}</span>
+          {% if row.is_important %}<span class="badge">중요</span>{% endif %}
           <div class="muted small">{{ row.category or '-' }} / score {{ row.importance_score or 0 }}</div>
+          {% if row.summary_failed %}<div class="muted small">요약 실패 후보</div>{% endif %}
         </td>
       </tr>
-      {% else %}
-      <tr><td colspan="4" class="muted">검색 결과가 없습니다.</td></tr>
-      {% endfor %}
+      {% else %}<tr><td colspan="4" class="muted">검색 결과가 없습니다.</td></tr>{% endfor %}
     </tbody>
   </table>
 </section>
