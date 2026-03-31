@@ -8,13 +8,18 @@ from fastapi.responses import FileResponse, RedirectResponse
 from ..db import create_job, finish_job, get_conn
 from ..services.pop3_ingest import ingest_from_pop3
 from ..services.repository import (
+    add_issue_link,
     add_tag,
+    build_period_summary,
+    create_issue_from_message,
     delete_link,
     get_message,
     insert_link,
     list_summary_failed_message_ids,
     remove_tag,
+    save_period_llm_summary,
     toggle_message_important,
+    update_issue,
     update_link,
     update_message_status,
 )
@@ -103,6 +108,47 @@ def build_router(summary_service: SummaryService | None = None) -> APIRouter:
     def action_remove_tag(message_id: int, tag: str = Form(...)):
         remove_tag(message_id, tag)
         return RedirectResponse(f'/messages/{message_id}', status_code=303)
+
+    @router.post('/actions/create-issue/{message_id}')
+    def action_create_issue(
+        message_id: int,
+        title: str = Form(...),
+        owner: str = Form(''),
+        due_date: str = Form(''),
+        priority: str = Form('MEDIUM'),
+        summary: str = Form(''),
+        next_action: str = Form(''),
+    ):
+        issue_id = create_issue_from_message(message_id, title, owner=owner, due_date=due_date, priority=priority, summary=summary, next_action=next_action)
+        return RedirectResponse(f'/issues/{issue_id}', status_code=303)
+
+    @router.post('/actions/update-issue/{issue_id}')
+    def action_update_issue(
+        issue_id: int,
+        status: str = Form(...),
+        owner: str = Form(''),
+        due_date: str = Form(''),
+        priority: str = Form('MEDIUM'),
+        summary: str = Form(''),
+        next_action: str = Form(''),
+    ):
+        update_issue(issue_id, status=status, owner=owner, due_date=due_date, priority=priority, summary=summary, next_action=next_action)
+        return RedirectResponse(f'/issues/{issue_id}', status_code=303)
+
+    @router.post('/actions/add-issue-link/{issue_id}')
+    def action_add_issue_link(issue_id: int, link_type: str = Form('manual'), title: str = Form(...), url: str = Form(...)):
+        add_issue_link(issue_id, link_type=link_type, title=title, url=url)
+        return RedirectResponse(f'/issues/{issue_id}', status_code=303)
+
+    @router.post('/actions/generate-report')
+    def action_generate_report(period_type: str = Form('week')):
+        job_id = create_job('period_report', 'running', f'Generate {period_type} report')
+        summary = build_period_summary(period_type=period_type)
+        # placeholder for future LLM period summary integration
+        text = f"{period_type} 보고: 수집 {summary['period_count']}건, 중요 {summary['important_count']}건, 리스크 {summary['risk_count']}건"
+        save_period_llm_summary(summary['period_type'], summary['period_key'], text)
+        finish_job(job_id, 'success', 'Period report generated', summary)
+        return RedirectResponse('/reports/weekly' if period_type == 'week' else '/reports/monthly', status_code=303)
 
     @router.get('/download/eml/{message_id}')
     def download_eml(message_id: int):

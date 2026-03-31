@@ -93,6 +93,7 @@ def init_db() -> None:
                 category TEXT,
                 status TEXT DEFAULT 'new',
                 tags_json TEXT,
+                tag_reasons_json TEXT,
                 importance_score INTEGER,
                 retry_count INTEGER DEFAULT 0,
                 raw_response TEXT,
@@ -119,6 +120,9 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS message_tags (
                 message_id INTEGER NOT NULL,
                 tag_id INTEGER NOT NULL,
+                source TEXT DEFAULT 'manual',
+                confidence REAL DEFAULT 1.0,
+                reason TEXT,
                 PRIMARY KEY (message_id, tag_id),
                 FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
                 FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
@@ -132,6 +136,41 @@ def init_db() -> None:
                 url TEXT NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS issues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                source_message_id INTEGER,
+                status TEXT DEFAULT 'OPEN',
+                owner TEXT,
+                due_date TEXT,
+                priority TEXT DEFAULT 'MEDIUM',
+                summary TEXT,
+                next_action TEXT,
+                related_links_json TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS issue_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                detail_json TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS period_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                period_type TEXT NOT NULL,
+                period_key TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                llm_summary TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(period_type, period_key)
             );
 
             CREATE TABLE IF NOT EXISTS jobs (
@@ -156,6 +195,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_summary_history_message_id ON summary_history(message_id);
             CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments(message_id);
             CREATE INDEX IF NOT EXISTS idx_message_tags_tag_id ON message_tags(tag_id);
+            CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
+            CREATE INDEX IF NOT EXISTS idx_issues_due_date ON issues(due_date);
+            CREATE INDEX IF NOT EXISTS idx_issue_events_issue_id ON issue_events(issue_id);
             '''
         )
 
@@ -164,9 +206,9 @@ def init_db() -> None:
         _ensure_column(conn, 'messages', 'references_header', 'references_header TEXT')
         _ensure_column(conn, 'messages', 'source_mailbox', "source_mailbox TEXT DEFAULT 'pop3'")
         _ensure_column(conn, 'messages', 'is_important', 'is_important INTEGER DEFAULT 0')
-
         _ensure_column(conn, 'summaries', 'status', "status TEXT DEFAULT 'new'")
         _ensure_column(conn, 'summaries', 'tags_json', 'tags_json TEXT')
+        _ensure_column(conn, 'summaries', 'tag_reasons_json', 'tag_reasons_json TEXT')
         _ensure_column(conn, 'summaries', 'retry_count', 'retry_count INTEGER DEFAULT 0')
         _ensure_column(conn, 'summaries', 'entities_people_json', 'entities_people_json TEXT')
         _ensure_column(conn, 'summaries', 'entities_orgs_json', 'entities_orgs_json TEXT')

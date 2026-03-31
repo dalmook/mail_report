@@ -78,7 +78,7 @@ a { color: var(--primary); text-decoration: none; }
   background: #eff6ff;
   font-size: 12px;
 }
-input, select {
+input, select, textarea {
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 10px;

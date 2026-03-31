@@ -1,47 +1,40 @@
-# Mail Archive Operator Console v3 (local-first)
+# Mail Archive Operator Console v4 (local-first)
 
-로컬 PC에서 장기 실행 가능한 FastAPI + SQLite 메일 운영 도구입니다.
+로컬 PC에서 실행하는 FastAPI + SQLite 기반 **메일 운영 지원 도구**입니다.
 
-## 핵심 운영 기능
-- POP3 수집 시 원본 EML 우선 저장(파싱 실패 시에도 원본 보존)
-- 요약 실패 메일 재처리(개별/일괄)
-- 상태(new/reviewed/flagged/archived), 중요 표시, 태그 운영
-- 링크 관리(추가/삭제)
-- 스레드/관련 메일/요약 이력 기반 추적
-- 운영 지표 중심 대시보드(기간별 수집, 실패, 중요/리스크, 발신자 TOP)
+## 이번 단계 핵심
+- 메일 자동 태깅(LLM + 규칙 기반) 및 태그 근거 저장
+- 메일을 이슈로 승격하고 상태/담당/마감/우선순위 관리
+- 주간/월간 리포트 집계 + 리포트 요약 텍스트 저장
+- 대시보드에서 즉시 액션 가능한 운영 우선순위 제공
 
-## 아키텍처
-- `app/main.py`: 앱 초기화/예외 처리/라우터 조립
-- `app/routers/pages.py`: 대시보드/목록/상세
-- `app/routers/actions.py`: 운영 액션(수집/요약/태그/상태/링크)
-- `app/services/pop3_ingest.py`: POP3 -> EML -> parse -> DB 파이프라인
-- `app/services/summary_service.py`: 요약 재시도/fallback/저장
-- `app/services/repository.py`: 조회/저장/운영 쿼리
-- `app/db.py`: SQLite 스키마 + migration 보정
+## 주요 화면
+- `/` : 운영 대시보드
+- `/messages` : 메일 큐
+- `/messages/{id}` : 메일 상세 + 이슈 생성/태그/상태/링크/관련 메일
+- `/issues` : 이슈 목록
+- `/issues/{id}` : 이슈 상세/편집/이력
+- `/reports/weekly`, `/reports/monthly` : 기간 리포트
+
+## 운영 흐름 (권장)
+1. 대시보드에서 POP3 수집
+2. 요약 실패 일괄 재처리
+3. 메일 상세에서 상태/태그/중요표시 정리
+4. 이슈 승격(담당/마감/우선순위 지정)
+5. 주간/월간 리포트 생성 후 팀 공유
 
 ## Local setup
-1. Python 3.11+ 권장
-2. 가상환경 및 설치
-   - `pip install -r requirements.txt`
-3. `.env.example` -> `.env` 복사 후 설정
-4. 실행
-   - `python -m uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload`
-5. 접속
-   - `http://127.0.0.1:8010`
+1. `pip install -r requirements.txt`
+2. `.env.example` 를 `.env`로 복사
+3. `python -m uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload`
+4. 브라우저: `http://127.0.0.1:8010`
 
-## 운영 순서(권장)
-1. 대시보드에서 `POP3 수집 실행`
-2. 목록 화면에서 필터(발신자/기간/상태/중요도/태그/요약실패순)로 큐 정렬
-3. 상세 화면에서 상태/태그/중요 표시/링크 정리
-4. 실패 또는 품질 미흡 메일 재요약
-5. 대시보드의 재요약 대상/리스크 높은 메일 카드 재점검
+## 장기 실행 주의사항
+- `data/archive.db`, `storage/` 주기 백업
+- `.env` 자격증명 주기 점검
+- OS 절전 모드로 인한 스케줄 중단 주의
+- 월 1회 이상 DB vacuum/백업 권장
 
 ## 테스트
 - `pytest -q`
 - `python -m compileall app tests`
-
-## 장기 실행 주의사항 (로컬 PC)
-- SQLite 파일/`storage/` 폴더 주기 백업
-- 주기적으로 오래된 첨부/EML 보관정책 점검
-- POP3 계정 비밀번호 변경 시 `.env` 즉시 갱신
-- 장시간 실행 시 OS 절전모드/네트워크 절전 해제 권장
