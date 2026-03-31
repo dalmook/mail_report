@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import logging
 
+from ..config import settings
 from ..db import get_conn
+from .mailer import MailerDisabledError, send_html_mail
+from .news_report import render_weekly_news_html
 from .repository import (
     build_period_summary,
+    list_issues,
     list_summary_failed_message_ids,
     save_period_llm_summary,
     upsert_issue_candidate,
@@ -22,7 +26,7 @@ class PipelineService:
 
     def run_full_pipeline(self, source: str = 'manual') -> dict[str, int]:
         run_id = self._start_run(f'pipeline_{source}')
-        stats = {'ingested': 0, 'summarized': 0, 'failed': 0, 'candidates': 0}
+        stats = {'ingested': 0, 'summarized': 0, 'failed': 0, 'candidates': 0, 'mail_sent': 0}
         try:
             ingest_result = ingest_from_pop3()
             stats['ingested'] = int(ingest_result.get('stored', 0))
@@ -43,12 +47,30 @@ class PipelineService:
             month = build_period_summary('month')
             save_period_llm_summary(month['period_type'], month['period_key'], f"월간 자동요약: 수집 {month['period_count']}건, 이슈전환 {month['issue_converted']}건")
 
+            if source in {'manual', 'auto_weekly'}:
+                if self.send_weekly_newsletter(week):
+                    stats['mail_sent'] = 1
+
             self._finish_run(run_id, 'success', detail=stats)
             return stats
         except Exception as exc:
             logger.exception('pipeline run failed')
             self._finish_run(run_id, 'failed', error=str(exc), detail=stats)
             return stats
+
+    def send_weekly_newsletter(self, week_report: dict | None = None) -> bool:
+        report = week_report or build_period_summary('week')
+        issues = list_issues()[:20]
+        html = render_weekly_news_html(report, issues)
+        to_emails = [e.strip() for e in settings.report_to_emails.split(',') if e.strip()]
+        try:
+            send_html_mail(subject=f"[주간운영리포트] {report['period_key']}", html_body=html, to_emails=to_emails)
+            return True
+        except MailerDisabledError:
+            return False
+        except Exception:
+            logger.exception('weekly newsletter send failed')
+            return False
 
     def _start_run(self, run_type: str) -> int:
         with get_conn() as conn:

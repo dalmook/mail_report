@@ -66,6 +66,17 @@ class Settings:
     llm_temperature: float
     llm_max_tokens: int
 
+    smtp_enabled: bool
+    smtp_host: str
+    smtp_port: int
+    smtp_use_tls: bool
+    smtp_user: str
+    smtp_pass: str
+    report_from_email: str
+    report_to_emails: str
+    weekly_report_auto_send: bool
+    weekly_report_send_weekday: int
+    weekly_report_send_hour: int
 
 
 def load_settings() -> Settings:
@@ -94,6 +105,17 @@ def load_settings() -> Settings:
         llm_timeout_seconds=_as_int('LLM_TIMEOUT_SECONDS', 60),
         llm_temperature=_as_float('LLM_TEMPERATURE', 0.2),
         llm_max_tokens=_as_int('LLM_MAX_TOKENS', 1200),
+        smtp_enabled=_as_bool(os.getenv('SMTP_ENABLED', 'false'), False),
+        smtp_host=os.getenv('SMTP_HOST', ''),
+        smtp_port=_as_int('SMTP_PORT', 587),
+        smtp_use_tls=_as_bool(os.getenv('SMTP_USE_TLS', 'true'), True),
+        smtp_user=os.getenv('SMTP_USER', ''),
+        smtp_pass=os.getenv('SMTP_PASS', ''),
+        report_from_email=os.getenv('REPORT_FROM_EMAIL', ''),
+        report_to_emails=os.getenv('REPORT_TO_EMAILS', ''),
+        weekly_report_auto_send=_as_bool(os.getenv('WEEKLY_REPORT_AUTO_SEND', 'false'), False),
+        weekly_report_send_weekday=_as_int('WEEKLY_REPORT_SEND_WEEKDAY', 1),
+        weekly_report_send_hour=_as_int('WEEKLY_REPORT_SEND_HOUR', 9),
     )
 
 

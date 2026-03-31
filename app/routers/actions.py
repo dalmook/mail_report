@@ -42,6 +42,14 @@ def build_router(summary_service: SummaryService | None = None) -> APIRouter:
         finish_job(job_id, 'success', 'Manual full pipeline finished', result)
         return RedirectResponse('/admin/ops', status_code=303)
 
+
+    @router.post('/actions/send-weekly-newsletter')
+    def action_send_weekly_newsletter():
+        job_id = create_job('weekly_newsletter', 'running', 'Manual weekly newsletter started')
+        ok = pipeline_service.send_weekly_newsletter()
+        finish_job(job_id, 'success' if ok else 'failed', 'Manual weekly newsletter finished', {'sent': ok})
+        return RedirectResponse('/admin/ops', status_code=303)
+
     @router.post('/actions/ingest')
     def action_ingest():
         job_id = create_job('pop3_ingest', 'running', 'Manual POP3 ingest started')
