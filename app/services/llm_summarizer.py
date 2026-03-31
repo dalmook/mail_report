@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any
 
 import requests
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMDisabledError(RuntimeError):
@@ -34,17 +37,26 @@ class LLMService:
             'Content-Type': 'application/json',
         }
 
+    @staticmethod
+    def parse_response_content(content: str) -> dict[str, Any]:
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            start = content.find('{')
+            end = content.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                return json.loads(content[start : end + 1])
+            raise
+
     def summarize_mail(self, subject: str, body_text: str) -> dict[str, Any]:
         if not self.enabled:
             raise LLMDisabledError('LLM is disabled or required environment values are missing.')
 
-        prompt = f'''아래 메일을 분석해서 반드시 JSON 하나만 반환하세요.
+        prompt = f'''아래 메일을 분석해 JSON 오브젝트 하나만 반환하세요.
 
-[메일 제목]
-{subject}
+[메일 제목]\n{subject}
 
-[메일 본문]
-{body_text[:12000]}
+[메일 본문]\n{body_text[:12000]}
 
 반환 스키마:
 {{
@@ -53,7 +65,13 @@ class LLMService:
   "keywords": ["키워드1", "키워드2"],
   "risks": ["리스크1"],
   "action_items": ["액션1"],
-  "category": "운영|품질|일정|보고|기타",
+  "category": "운영|품질|일정|보고|보안|고객|기타",
+  "status": "new|reviewed|flagged|archived",
+  "entities_people": ["사람1"],
+  "entities_orgs": ["조직1"],
+  "deadlines": ["2026-04-10 계약 검토"],
+  "numeric_facts": ["예산 3억원"],
+  "tags": ["태그1", "태그2"],
   "importance_score": 0
 }}
 '''
@@ -62,7 +80,7 @@ class LLMService:
             'messages': [
                 {
                     'role': 'system',
-                    'content': '당신은 사내 메일 아카이브 분석기입니다. 항상 한국어 JSON만 반환하세요.',
+                    'content': '당신은 사내 메일 아카이브 분석기입니다. 반드시 유효한 JSON만 반환하세요.',
                 },
                 {'role': 'user', 'content': prompt},
             ],
@@ -80,12 +98,5 @@ class LLMService:
         response.raise_for_status()
         data = response.json()
         content = data['choices'][0]['message']['content']
-
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            start = content.find('{')
-            end = content.rfind('}')
-            if start != -1 and end != -1 and end > start:
-                return json.loads(content[start : end + 1])
-            raise
+        logger.info('Received LLM summary response payload')
+        return self.parse_response_content(content)

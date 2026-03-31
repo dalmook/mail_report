@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>이슈 #{{ issue.id }} - {{ issue.title }}</h2>
+  <p class="muted">연결 메일: {% if source_message %}<a href="/messages/{{ source_message.id }}">{{ source_message.subject }}</a>{% else %}-{% endif %}</p>
+</section>
+
+<section class="card">
+  <h3>이슈 편집</h3>
+  <form method="post" action="/actions/update-issue/{{ issue.id }}" class="stack gap12">
+    <div class="row wrap gap12">
+      <select name="status">{% for s in ['OPEN','IN_PROGRESS','HOLD','CLOSED'] %}<option value="{{ s }}" {% if issue.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+      <input type="text" name="owner" value="{{ issue.owner or '' }}" placeholder="담당자" />
+      <input type="date" name="due_date" value="{{ issue.due_date or '' }}" />
+      <select name="priority">{% for p in ['LOW','MEDIUM','HIGH','CRITICAL'] %}<option value="{{ p }}" {% if issue.priority==p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+    </div>
+    <textarea name="summary" rows="3" placeholder="이슈 요약">{{ issue.summary or '' }}</textarea>
+    <textarea name="next_action" rows="3" placeholder="다음 액션">{{ issue.next_action or '' }}</textarea>
+    <button class="btn primary" type="submit">저장</button>
+  </form>
+</section>
+
+<section class="grid cols-2 gap16">
+  <div class="card">
+    <h3>이슈 링크</h3>
+    <form method="post" action="/actions/add-issue-link/{{ issue.id }}" class="stack gap12">
+      <input type="text" name="title" placeholder="링크 제목" required />
+      <input type="url" name="url" placeholder="https://..." required />
+      <select name="link_type">{% for t in ['confluence','jira','drive','manual','report'] %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+      <button class="btn" type="submit">링크 추가</button>
+    </form>
+    <ul>
+      {% for link in issue_links %}<li>[{{ link.link_type }}] <a href="{{ link.url }}" target="_blank">{{ link.title }}</a></li>{% else %}<li class="muted">링크 없음</li>{% endfor %}
+    </ul>
+  </div>
+  <div class="card">
+    <h3>이슈 이벤트 이력</h3>
+    <ul>
+      {% for ev in events %}<li>{{ ev.created_at }} - {{ ev.event_type }}</li>{% else %}<li class="muted">이력 없음</li>{% endfor %}
+    </ul>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <div class="row between center wrap gap12">
+    <h2>{{ label }} 리포트 - {{ report.period_key }}</h2>
+    <form method="post" action="/actions/generate-report" class="inline">
+      <input type="hidden" name="period_type" value="{{ 'week' if label=='주간' else 'month' }}" />
+      <button class="btn primary" type="submit">리포트 재생성</button>
+    </form>
+  </div>
+  <p class="muted">{{ report.llm_summary or '기간 요약 텍스트가 아직 없습니다. 재생성 버튼을 눌러주세요.' }}</p>
+</section>
+
+<section class="grid cols-3 gap16">
+  <div class="card stat"><div class="label">수집 건수</div><div class="value">{{ report.period_count }}</div></div>
+  <div class="card stat"><div class="label">중요 메일</div><div class="value">{{ report.important_count }}</div></div>
+  <div class="card stat"><div class="label">리스크 메일</div><div class="value">{{ report.risk_count }}</div></div>
+  <div class="card stat"><div class="label">이슈 전환</div><div class="value">{{ report.issue_converted }}</div></div>
+  <div class="card stat"><div class="label">요약 재처리</div><div class="value">{{ report.summary_retry }}</div></div>
+  <div class="card stat warn"><div class="label">요약 실패</div><div class="value">{{ report.summary_failed }}</div></div>
+</section>
+
+<section class="grid cols-2 gap16">
+  <div class="card"><h3>카테고리 분포</h3><ul>{% for c in report.category_rows %}<li>{{ c.category }} : {{ c.cnt }}</li>{% else %}<li class="muted">없음</li>{% endfor %}</ul></div>
+  <div class="card"><h3>발신자 TOP</h3><ul>{% for s in report.sender_top %}<li>{{ s.from_email }} : {{ s.cnt }}</li>{% else %}<li class="muted">없음</li>{% endfor %}</ul></div>
+</section>
+
+<section class="card"><h3>액션아이템 많은 메일</h3><ul>{% for m in report.action_item_mails %}<li><a href="/messages/{{ m.id }}">{{ m.subject }}</a></li>{% else %}<li class="muted">없음</li>{% endfor %}</ul></section>
+{% endblock %}
