@@ -25,6 +25,12 @@ def get_conn() -> Iterable[sqlite3.Connection]:
         conn.close()
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    cols = {row['name'] for row in conn.execute(f'PRAGMA table_info({table})').fetchall()}
+    if column not in cols:
+        conn.execute(f'ALTER TABLE {table} ADD COLUMN {ddl}')
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(
@@ -34,6 +40,7 @@ def init_db() -> None:
                 pop3_uidl TEXT UNIQUE,
                 message_id TEXT,
                 subject TEXT,
+                subject_normalized TEXT,
                 from_name TEXT,
                 from_email TEXT,
                 to_emails TEXT,
@@ -44,11 +51,13 @@ def init_db() -> None:
                 html_body TEXT,
                 body_preview TEXT,
                 importance TEXT,
+                in_reply_to TEXT,
+                references_header TEXT,
+                source_mailbox TEXT DEFAULT 'pop3',
                 has_attachment INTEGER DEFAULT 0,
                 thread_key TEXT,
                 eml_path TEXT NOT NULL,
                 status TEXT DEFAULT 'new',
-                external_link TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -75,6 +84,8 @@ def init_db() -> None:
                 risks_json TEXT,
                 action_items_json TEXT,
                 category TEXT,
+                status TEXT DEFAULT 'triaged',
+                tags_json TEXT,
                 importance_score INTEGER,
                 raw_response TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -105,8 +116,16 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_messages_thread_key ON messages(thread_key);
             CREATE INDEX IF NOT EXISTS idx_messages_from_email ON messages(from_email);
             CREATE INDEX IF NOT EXISTS idx_links_message_id ON links(message_id);
+            CREATE INDEX IF NOT EXISTS idx_summaries_status ON summaries(status);
             '''
         )
+
+        _ensure_column(conn, 'messages', 'subject_normalized', 'subject_normalized TEXT')
+        _ensure_column(conn, 'messages', 'in_reply_to', 'in_reply_to TEXT')
+        _ensure_column(conn, 'messages', 'references_header', 'references_header TEXT')
+        _ensure_column(conn, 'messages', 'source_mailbox', "source_mailbox TEXT DEFAULT 'pop3'")
+        _ensure_column(conn, 'summaries', 'status', "status TEXT DEFAULT 'triaged'")
+        _ensure_column(conn, 'summaries', 'tags_json', 'tags_json TEXT')
 
 
 def create_job(job_type: str, status: str = 'running', message: str = '', detail: dict[str, Any] | None = None) -> int:

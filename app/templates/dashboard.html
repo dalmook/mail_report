@@ -1,10 +1,10 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="hero card">
+<section class="card hero">
   <div class="row between center wrap gap16">
     <div>
-      <h2>메일 아카이브 대시보드</h2>
-      <p class="muted">POP3 수집, EML 저장, LLM 요약, 링크 연결까지 한 화면에서 관리합니다.</p>
+      <h2>Daily Mail Operations</h2>
+      <p class="muted">수집, 분류, 리스크 추적, 후속조치가 필요한 메일을 한눈에 확인합니다.</p>
     </div>
     <form method="post" action="/actions/ingest">
       <button class="btn primary" type="submit">POP3 수집 실행</button>
@@ -15,20 +15,26 @@
 <section class="grid cols-3 gap16 stat-grid">
   <div class="card stat"><div class="label">전체 메일</div><div class="value">{{ stats.total_messages }}</div></div>
   <div class="card stat"><div class="label">요약 완료</div><div class="value">{{ stats.total_summaries }}</div></div>
-  <div class="card stat"><div class="label">첨부 개수</div><div class="value">{{ stats.attachments }}</div></div>
+  <div class="card stat"><div class="label">미요약</div><div class="value">{{ stats.unsummarized }}</div></div>
+  <div class="card stat warn"><div class="label">조치 필요</div><div class="value">{{ stats.action_required }}</div></div>
+  <div class="card stat"><div class="label">고중요도 (80+)</div><div class="value">{{ stats.high_priority }}</div></div>
+  <div class="card stat"><div class="label">첨부 파일 수</div><div class="value">{{ stats.attachments }}</div></div>
 </section>
 
 <section class="grid cols-2 gap16 two-col">
   <div class="card">
-    <h3>최근 메일</h3>
+    <h3>최근 유입 메일</h3>
     <table class="table">
-      <thead><tr><th>일시</th><th>제목</th><th>발신자</th></tr></thead>
+      <thead><tr><th>일시</th><th>제목</th><th>상태</th></tr></thead>
       <tbody>
       {% for row in stats.recent_messages %}
         <tr>
           <td>{{ row.sent_at or '-' }}</td>
-          <td><a href="/messages/{{ row.id }}">{{ row.subject }}</a></td>
-          <td>{{ row.from_email or '-' }}</td>
+          <td><a href="/messages/{{ row.id }}">{{ row.subject }}</a><div class="muted small">{{ row.from_email }}</div></td>
+          <td>
+            <span class="badge">{{ row.status or 'new' }}</span>
+            <div class="muted small">{{ row.category or '-' }} / {{ row.importance_score or 0 }}</div>
+          </td>
         </tr>
       {% else %}
         <tr><td colspan="3" class="muted">데이터 없음</td></tr>
@@ -39,7 +45,7 @@
 
   <div class="card">
     <h3>카테고리 분포</h3>
-    <table class="table">
+    <table class="table compact">
       <thead><tr><th>카테고리</th><th>건수</th></tr></thead>
       <tbody>
       {% for row in stats.category_rows %}
@@ -54,14 +60,14 @@
 
 <section class="card">
   <h3>최근 작업 이력</h3>
-  <table class="table">
+  <table class="table compact">
     <thead><tr><th>ID</th><th>작업</th><th>상태</th><th>시작</th><th>종료</th><th>메시지</th></tr></thead>
     <tbody>
       {% for row in stats.jobs %}
         <tr>
           <td>{{ row.id }}</td>
           <td>{{ row.job_type }}</td>
-          <td>{{ row.status }}</td>
+          <td><span class="badge">{{ row.status }}</span></td>
           <td>{{ row.started_at }}</td>
           <td>{{ row.finished_at or '-' }}</td>
           <td>{{ row.message or '-' }}</td>

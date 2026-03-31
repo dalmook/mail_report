@@ -1,16 +1,23 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="card">
-  <h2>메일 목록</h2>
+  <h2>Message Review Queue</h2>
   <form method="get" class="filters row wrap gap12">
     <input type="text" name="q" value="{{ q }}" placeholder="제목/발신자/본문 검색" />
     <input type="text" name="category" value="{{ category }}" placeholder="카테고리" />
+    <input type="text" name="tag" value="{{ tag }}" placeholder="태그" />
     <select name="has_summary">
       <option value="" {% if not has_summary %}selected{% endif %}>요약 전체</option>
       <option value="Y" {% if has_summary == 'Y' %}selected{% endif %}>요약 완료</option>
       <option value="N" {% if has_summary == 'N' %}selected{% endif %}>요약 미완료</option>
     </select>
-    <button class="btn primary" type="submit">조회</button>
+    <select name="status">
+      <option value="" {% if not status %}selected{% endif %}>상태 전체</option>
+      {% for s in ['new','triaged','action_required','waiting','closed'] %}
+      <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn primary" type="submit">필터 적용</button>
   </form>
 </section>
 
@@ -19,25 +26,27 @@
     <thead>
       <tr>
         <th>일시</th>
-        <th>제목</th>
-        <th>발신자</th>
-        <th>한줄 요약</th>
-        <th>카테고리</th>
-        <th>점수</th>
+        <th>제목/발신자</th>
+        <th>요약</th>
+        <th>메타데이터</th>
       </tr>
     </thead>
     <tbody>
       {% for row in rows %}
       <tr>
         <td>{{ row.sent_at or '-' }}</td>
-        <td><a href="/messages/{{ row.id }}">{{ row.subject }}</a></td>
-        <td>{{ row.from_email or '-' }}</td>
+        <td>
+          <a href="/messages/{{ row.id }}"><strong>{{ row.subject }}</strong></a>
+          <div class="muted small">{{ row.from_email or '-' }}</div>
+        </td>
         <td>{{ row.summary_short or row.body_preview or '-' }}</td>
-        <td>{{ row.category or '-' }}</td>
-        <td>{{ row.importance_score or '-' }}</td>
+        <td>
+          <div><span class="badge">{{ row.summary_status or 'new' }}</span></div>
+          <div class="muted small">{{ row.category or '-' }} / score {{ row.importance_score or 0 }}</div>
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="muted">검색 결과가 없습니다.</td></tr>
+      <tr><td colspan="4" class="muted">검색 결과가 없습니다.</td></tr>
       {% endfor %}
     </tbody>
   </table>

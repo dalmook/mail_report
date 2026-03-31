@@ -5,12 +5,15 @@
     <div>
       <h2>{{ row.subject }}</h2>
       <p class="muted">{{ row.from_name or '' }} {{ row.from_email or '' }}</p>
-      <p class="muted">발신: {{ row.sent_at or '-' }} / 수신기록: {{ row.received_at or '-' }}</p>
+      <p class="muted">발신: {{ row.sent_at or '-' }} / 수집: {{ row.received_at or '-' }}</p>
     </div>
     <div class="row gap12 wrap">
       <a class="btn" href="/download/eml/{{ row.id }}">EML 다운로드</a>
       <form method="post" action="/actions/summarize/{{ row.id }}">
-        <button class="btn primary" type="submit">LLM 요약 실행</button>
+        <button class="btn primary" type="submit">요약 생성</button>
+      </form>
+      <form method="post" action="/actions/resummarize/{{ row.id }}">
+        <button class="btn" type="submit">관리자 재요약</button>
       </form>
     </div>
   </div>
@@ -25,9 +28,16 @@
   </div>
 
   <div class="card">
-    <h3>분류</h3>
+    <h3>운영 메타데이터</h3>
     <p><strong>카테고리:</strong> {{ row.category or '-' }}</p>
+    <p><strong>상태:</strong> <span class="badge">{{ row.summary_status or row.status or 'new' }}</span></p>
     <p><strong>중요도:</strong> {{ row.importance_score or '-' }}</p>
+    <p><strong>Thread Key:</strong> {{ row.thread_key or '-' }}</p>
+
+    <h4>태그</h4>
+    <div class="chips">
+      {% for item in tags %}<span class="chip">{{ item }}</span>{% else %}<span class="muted">없음</span>{% endfor %}
+    </div>
 
     <h4>키워드</h4>
     <div class="chips">
@@ -59,11 +69,11 @@
   </div>
 
   <div class="card">
-    <h3>관련 링크</h3>
+    <h3>외부 링크</h3>
     <form method="post" action="/actions/add-link/{{ row.id }}" class="stack gap12">
       <input type="text" name="title" placeholder="링크 제목" required />
       <input type="url" name="url" placeholder="https://..." required />
-      <input type="text" name="link_type" placeholder="manual / confluence / jira / drive" value="manual" />
+      <input type="text" name="link_type" placeholder="manual / jira / drive / wiki" value="manual" />
       <button class="btn primary" type="submit">링크 추가</button>
     </form>
     <hr />
@@ -81,7 +91,7 @@
   <h3>스레드</h3>
   <ul>
     {% for item in thread_rows %}
-      <li><a href="/messages/{{ item.id }}">{{ item.subject }}</a> - {{ item.from_email }} - {{ item.sent_at or '-' }}</li>
+      <li><a href="/messages/{{ item.id }}">{{ item.subject }}</a> - {{ item.from_email }} - {{ item.sent_at or '-' }} ({{ item.summary_status or 'new' }})</li>
     {% else %}
       <li class="muted">스레드 정보 없음</li>
     {% endfor %}

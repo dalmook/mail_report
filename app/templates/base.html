@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{{ title or 'Mail Archive' }}</title>
+  <title>{{ title or 'Mail Archive Operator Console' }}</title>
   <link rel="stylesheet" href="/static/css/app.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="container row between center">
+    <div class="container row between center wrap gap16">
       <div>
         <h1 class="app-title"><a href="/">{{ request.app.title }}</a></h1>
-        <p class="muted">로컬 FastAPI 메일 아카이브</p>
+        <p class="muted">로컬 운영자용 메일 아카이브 v2</p>
       </div>
       <nav class="nav">
-        <a href="/">대시보드</a>
-        <a href="/messages">메일 목록</a>
+        <a href="/">Dashboard</a>
+        <a href="/messages">Inbox Review</a>
       </nav>
     </div>
   </header>

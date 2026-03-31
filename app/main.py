@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from .config import settings
 from .db import create_job, finish_job, init_db
 from .scheduler import start_scheduler, stop_scheduler
+from .schemas import summary_to_dict, validate_summary_payload
 from .services.llm_summarizer import LLMDisabledError, LLMService
 from .services.pop3_ingest import ingest_from_pop3
 from .services.repository import (
@@ -22,6 +23,7 @@ from .services.repository import (
     get_thread,
     insert_link,
     list_messages,
+    tags_for_message,
     upsert_summary,
 )
 
@@ -50,6 +52,24 @@ def _parse_json_list(value: str | None) -> list[str]:
         return []
 
 
+def _run_summary_job(message_id: int, force: bool = False) -> None:
+    row = get_message(message_id)
+    if not row:
+        raise HTTPException(status_code=404, detail='Message not found')
+
+    job_name = 'llm_resummary' if force else 'llm_summary'
+    job_id = create_job(job_name, 'running', f'Summarize message #{message_id}')
+    try:
+        data = llm_service.summarize_mail(row['subject'], row['text_body'] or row['body_preview'] or '')
+        validated = validate_summary_payload(data)
+        upsert_summary(message_id, settings.llm_model, summary_to_dict(validated), data)
+        finish_job(job_id, 'success', 'Summary created', {'message_id': message_id})
+    except LLMDisabledError as exc:
+        finish_job(job_id, 'failed', str(exc), {'message_id': message_id})
+    except Exception as exc:
+        finish_job(job_id, 'failed', f'Summary failed: {exc}', {'message_id': message_id, 'error': str(exc)})
+
+
 @app.get('/', response_class=HTMLResponse)
 def dashboard(request: Request):
     stats = dashboard_stats()
@@ -57,11 +77,26 @@ def dashboard(request: Request):
 
 
 @app.get('/messages', response_class=HTMLResponse)
-def messages_page(request: Request, q: str = '', category: str = '', has_summary: str = ''):
-    rows = list_messages(q=q, category=category, has_summary=has_summary)
+def messages_page(
+    request: Request,
+    q: str = '',
+    category: str = '',
+    has_summary: str = '',
+    status: str = '',
+    tag: str = '',
+):
+    rows = list_messages(q=q, category=category, has_summary=has_summary, status=status, tag=tag)
     return templates.TemplateResponse(
         'messages.html',
-        {'request': request, 'rows': rows, 'q': q, 'category': category, 'has_summary': has_summary},
+        {
+            'request': request,
+            'rows': rows,
+            'q': q,
+            'category': category,
+            'has_summary': has_summary,
+            'status': status,
+            'tag': tag,
+        },
     )
 
 
@@ -84,6 +119,7 @@ def message_detail(request: Request, message_id: int):
             'keywords': _parse_json_list(row['keywords_json']),
             'risks': _parse_json_list(row['risks_json']),
             'action_items': _parse_json_list(row['action_items_json']),
+            'tags': tags_for_message(row),
         },
     )
 
@@ -101,19 +137,13 @@ def action_ingest():
 
 @app.post('/actions/summarize/{message_id}')
 def action_summarize(message_id: int):
-    row = get_message(message_id)
-    if not row:
-        raise HTTPException(status_code=404, detail='Message not found')
+    _run_summary_job(message_id)
+    return RedirectResponse(f'/messages/{message_id}', status_code=303)
 
-    job_id = create_job('llm_summary', 'running', f'Summarize message #{message_id}')
-    try:
-        data = llm_service.summarize_mail(row['subject'], row['text_body'] or row['body_preview'] or '')
-        upsert_summary(message_id, settings.llm_model, data, data)
-        finish_job(job_id, 'success', 'Summary created', {'message_id': message_id})
-    except LLMDisabledError as exc:
-        finish_job(job_id, 'failed', str(exc), {'message_id': message_id})
-    except Exception as exc:
-        finish_job(job_id, 'failed', f'Summary failed: {exc}', {'message_id': message_id, 'error': str(exc)})
+
+@app.post('/actions/resummarize/{message_id}')
+def action_resummarize(message_id: int):
+    _run_summary_job(message_id, force=True)
     return RedirectResponse(f'/messages/{message_id}', status_code=303)
 
 

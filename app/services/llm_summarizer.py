@@ -38,13 +38,11 @@ class LLMService:
         if not self.enabled:
             raise LLMDisabledError('LLM is disabled or required environment values are missing.')
 
-        prompt = f'''아래 메일을 분석해서 반드시 JSON 하나만 반환하세요.
+        prompt = f'''아래 메일을 분석해 JSON 오브젝트 하나만 반환하세요.
 
-[메일 제목]
-{subject}
+[메일 제목]\n{subject}
 
-[메일 본문]
-{body_text[:12000]}
+[메일 본문]\n{body_text[:12000]}
 
 반환 스키마:
 {{
@@ -53,7 +51,9 @@ class LLMService:
   "keywords": ["키워드1", "키워드2"],
   "risks": ["리스크1"],
   "action_items": ["액션1"],
-  "category": "운영|품질|일정|보고|기타",
+  "category": "운영|품질|일정|보고|보안|고객|기타",
+  "status": "new|triaged|action_required|waiting|closed",
+  "tags": ["태그1", "태그2"],
   "importance_score": 0
 }}
 '''
@@ -62,7 +62,7 @@ class LLMService:
             'messages': [
                 {
                     'role': 'system',
-                    'content': '당신은 사내 메일 아카이브 분석기입니다. 항상 한국어 JSON만 반환하세요.',
+                    'content': '당신은 사내 메일 아카이브 분석기입니다. 반드시 유효한 JSON만 반환하세요.',
                 },
                 {'role': 'user', 'content': prompt},
             ],

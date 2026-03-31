@@ -1,19 +1,27 @@
 from __future__ import annotations
 
-import os
 import poplib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ..config import settings
 from ..db import get_conn
-from .eml_parser import parse_eml_bytes
+from .eml_parser import ParsedAttachment, ParsedEmail, parse_eml_bytes
+
+
+def _safe_dt(sent_at_iso: str | None) -> datetime:
+    if not sent_at_iso:
+        return datetime.now(timezone.utc)
+    try:
+        return datetime.fromisoformat(sent_at_iso)
+    except Exception:
+        return datetime.now(timezone.utc)
 
 
 def _save_eml(raw_bytes: bytes, sent_at_iso: str | None) -> Path:
-    dt = datetime.fromisoformat(sent_at_iso) if sent_at_iso else datetime.now()
+    dt = _safe_dt(sent_at_iso)
     target_dir = settings.storage_root / 'eml' / f'{dt.year:04d}' / f'{dt.month:02d}'
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f'{dt.strftime("%Y%m%d_%H%M%S_%f")}.eml'
@@ -22,8 +30,8 @@ def _save_eml(raw_bytes: bytes, sent_at_iso: str | None) -> Path:
     return file_path
 
 
-def _save_attachment(message_id: int, attachment: Any, sent_at_iso: str | None) -> str:
-    dt = datetime.fromisoformat(sent_at_iso) if sent_at_iso else datetime.now()
+def _save_attachment(message_id: int, attachment: ParsedAttachment, sent_at_iso: str | None) -> str:
+    dt = _safe_dt(sent_at_iso)
     target_dir = settings.storage_root / 'attachments' / f'{dt.year:04d}' / f'{dt.month:02d}' / str(message_id)
     target_dir.mkdir(parents=True, exist_ok=True)
     safe_name = attachment.filename.replace('/', '_').replace('\\', '_')
@@ -32,20 +40,21 @@ def _save_attachment(message_id: int, attachment: Any, sent_at_iso: str | None) 
     return str(file_path)
 
 
-def _insert_message(uidl: str, parsed: Any, eml_path: str) -> int:
+def _insert_message(uidl: str, parsed: ParsedEmail, eml_path: str) -> int:
     with get_conn() as conn:
         cur = conn.execute(
             '''
             INSERT INTO messages(
-                pop3_uidl, message_id, subject, from_name, from_email, to_emails, cc_emails,
+                pop3_uidl, message_id, subject, subject_normalized, from_name, from_email, to_emails, cc_emails,
                 sent_at, received_at, text_body, html_body, body_preview, importance,
-                has_attachment, thread_key, eml_path, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+                in_reply_to, references_header, source_mailbox, has_attachment, thread_key, eml_path, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
             ''',
             (
                 uidl,
                 parsed.message_id,
                 parsed.subject,
+                parsed.subject_normalized,
                 parsed.from_name,
                 parsed.from_email,
                 parsed.to_emails,
@@ -56,6 +65,9 @@ def _insert_message(uidl: str, parsed: Any, eml_path: str) -> int:
                 parsed.html_body,
                 parsed.body_preview,
                 parsed.importance,
+                parsed.in_reply_to,
+                parsed.references,
+                parsed.source_mailbox,
                 1 if parsed.attachments else 0,
                 parsed.thread_key,
                 eml_path,
@@ -64,7 +76,7 @@ def _insert_message(uidl: str, parsed: Any, eml_path: str) -> int:
         return int(cur.lastrowid)
 
 
-def _insert_attachments(message_row_id: int, parsed: Any) -> None:
+def _insert_attachments(message_row_id: int, parsed: ParsedEmail) -> None:
     with get_conn() as conn:
         for attachment in parsed.attachments:
             file_path = _save_attachment(message_row_id, attachment, parsed.sent_at)
@@ -93,7 +105,11 @@ def ingest_from_pop3() -> dict[str, Any]:
     result = {'fetched': 0, 'stored': 0, 'skipped': 0, 'errors': []}
 
     try:
-        client = poplib.POP3_SSL(settings.pop3_host, settings.pop3_port) if settings.pop3_use_ssl else poplib.POP3(settings.pop3_host, settings.pop3_port)
+        client = (
+            poplib.POP3_SSL(settings.pop3_host, settings.pop3_port)
+            if settings.pop3_use_ssl
+            else poplib.POP3(settings.pop3_host, settings.pop3_port)
+        )
         client.user(settings.pop3_user)
         client.pass_(settings.pop3_pass)
 
@@ -101,9 +117,10 @@ def ingest_from_pop3() -> dict[str, Any]:
         uidl_pairs = []
         for line in uidl_lines[-settings.pop3_max_messages_per_run :]:
             parts = line.decode('utf-8', errors='replace').split()
-            if len(parts) == 2:
+            if len(parts) == 2 and parts[0].isdigit():
                 uidl_pairs.append((int(parts[0]), parts[1]))
 
+        uidl_pairs.sort(key=lambda item: item[0])
         for msg_num, uidl in uidl_pairs:
             result['fetched'] += 1
             with get_conn() as conn:
