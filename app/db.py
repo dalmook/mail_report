@@ -87,9 +87,24 @@ def init_db() -> None:
                 status TEXT DEFAULT 'triaged',
                 tags_json TEXT,
                 importance_score INTEGER,
+                retry_count INTEGER DEFAULT 0,
                 raw_response TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS message_tags (
+                message_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                PRIMARY KEY (message_id, tag_id),
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS links (
@@ -112,11 +127,15 @@ def init_db() -> None:
                 detail_json TEXT
             );
 
+            CREATE INDEX IF NOT EXISTS idx_messages_uidl ON messages(pop3_uidl);
             CREATE INDEX IF NOT EXISTS idx_messages_sent_at ON messages(sent_at);
             CREATE INDEX IF NOT EXISTS idx_messages_thread_key ON messages(thread_key);
             CREATE INDEX IF NOT EXISTS idx_messages_from_email ON messages(from_email);
             CREATE INDEX IF NOT EXISTS idx_links_message_id ON links(message_id);
             CREATE INDEX IF NOT EXISTS idx_summaries_status ON summaries(status);
+            CREATE INDEX IF NOT EXISTS idx_summaries_category ON summaries(category);
+            CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments(message_id);
+            CREATE INDEX IF NOT EXISTS idx_message_tags_tag_id ON message_tags(tag_id);
             '''
         )
 
@@ -126,6 +145,7 @@ def init_db() -> None:
         _ensure_column(conn, 'messages', 'source_mailbox', "source_mailbox TEXT DEFAULT 'pop3'")
         _ensure_column(conn, 'summaries', 'status', "status TEXT DEFAULT 'triaged'")
         _ensure_column(conn, 'summaries', 'tags_json', 'tags_json TEXT')
+        _ensure_column(conn, 'summaries', 'retry_count', 'retry_count INTEGER DEFAULT 0')
 
 
 def create_job(job_type: str, status: str = 'running', message: str = '', detail: dict[str, Any] | None = None) -> int:

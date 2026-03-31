@@ -16,6 +16,19 @@ def _json_list(raw: str | None) -> list[str]:
         return []
 
 
+def _sync_tags(conn: Any, message_id: int, tags: list[str]) -> None:
+    clean_tags = [tag.strip() for tag in tags if tag and tag.strip()]
+    conn.execute('DELETE FROM message_tags WHERE message_id = ?', (message_id,))
+    for tag in sorted(set(clean_tags)):
+        conn.execute('INSERT INTO tags(name) VALUES (?) ON CONFLICT(name) DO NOTHING', (tag,))
+        tag_row = conn.execute('SELECT id FROM tags WHERE name = ?', (tag,)).fetchone()
+        if tag_row:
+            conn.execute(
+                'INSERT INTO message_tags(message_id, tag_id) VALUES (?, ?) ON CONFLICT(message_id, tag_id) DO NOTHING',
+                (message_id, tag_row['id']),
+            )
+
+
 def dashboard_stats() -> dict[str, Any]:
     with get_conn() as conn:
         total_messages = conn.execute('SELECT COUNT(*) FROM messages').fetchone()[0]
@@ -91,7 +104,7 @@ def list_messages(
         sql += ' AND COALESCE(s.status, "new") = ?'
         params.append(status)
     if tag:
-        sql += ' AND s.tags_json LIKE ?'
+        sql += ' AND EXISTS (SELECT 1 FROM message_tags mt JOIN tags t ON t.id = mt.tag_id WHERE mt.message_id = m.id AND t.name LIKE ?)'
         params.append(f'%{tag}%')
 
     sql += ' ORDER BY COALESCE(m.sent_at, m.received_at) DESC LIMIT ?'
@@ -144,14 +157,21 @@ def get_thread(message_id: int) -> list[Any]:
         ).fetchall()
 
 
-def upsert_summary(message_id: int, model_name: str, data: dict[str, Any], raw_response: dict[str, Any] | None = None) -> None:
+def upsert_summary(
+    message_id: int,
+    model_name: str,
+    data: dict[str, Any],
+    raw_response: dict[str, Any] | None = None,
+    retry_count: int = 0,
+) -> None:
+    tags = data.get('tags', [])
     with get_conn() as conn:
         conn.execute(
             '''
             INSERT INTO summaries(
                 message_id, model_name, summary_short, summary_long, keywords_json,
-                risks_json, action_items_json, category, status, tags_json, importance_score, raw_response
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                risks_json, action_items_json, category, status, tags_json, importance_score, retry_count, raw_response
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(message_id) DO UPDATE SET
                 model_name=excluded.model_name,
                 summary_short=excluded.summary_short,
@@ -163,6 +183,7 @@ def upsert_summary(message_id: int, model_name: str, data: dict[str, Any], raw_r
                 status=excluded.status,
                 tags_json=excluded.tags_json,
                 importance_score=excluded.importance_score,
+                retry_count=excluded.retry_count,
                 raw_response=excluded.raw_response,
                 created_at=CURRENT_TIMESTAMP
             ''',
@@ -176,11 +197,13 @@ def upsert_summary(message_id: int, model_name: str, data: dict[str, Any], raw_r
                 json.dumps(data.get('action_items', []), ensure_ascii=False),
                 data.get('category', '기타'),
                 data.get('status', 'triaged'),
-                json.dumps(data.get('tags', []), ensure_ascii=False),
+                json.dumps(tags, ensure_ascii=False),
                 int(data.get('importance_score', 0) or 0),
+                retry_count,
                 json.dumps(raw_response or data, ensure_ascii=False),
             ),
         )
+        _sync_tags(conn, message_id, tags)
 
 
 def insert_link(message_id: int, link_type: str, title: str, url: str) -> None:

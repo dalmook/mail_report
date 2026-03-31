@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import poplib
 import sqlite3
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from typing import Any
 from ..config import settings
 from ..db import get_conn
 from .eml_parser import ParsedAttachment, ParsedEmail, parse_eml_bytes
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_dt(sent_at_iso: str | None) -> datetime:
@@ -20,7 +23,7 @@ def _safe_dt(sent_at_iso: str | None) -> datetime:
         return datetime.now(timezone.utc)
 
 
-def _save_eml(raw_bytes: bytes, sent_at_iso: str | None) -> Path:
+def _save_eml(raw_bytes: bytes, sent_at_iso: str | None = None) -> Path:
     dt = _safe_dt(sent_at_iso)
     target_dir = settings.storage_root / 'eml' / f'{dt.year:04d}' / f'{dt.month:02d}'
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +41,16 @@ def _save_attachment(message_id: int, attachment: ParsedAttachment, sent_at_iso:
     file_path = target_dir / safe_name
     file_path.write_bytes(attachment.payload)
     return str(file_path)
+
+
+def parse_uidl_lines(uidl_lines: list[bytes], max_messages: int) -> list[tuple[int, str]]:
+    uidl_pairs = []
+    for line in uidl_lines[-max_messages:]:
+        parts = line.decode('utf-8', errors='replace').split()
+        if len(parts) == 2 and parts[0].isdigit():
+            uidl_pairs.append((int(parts[0]), parts[1]))
+    uidl_pairs.sort(key=lambda item: item[0])
+    return uidl_pairs
 
 
 def _insert_message(uidl: str, parsed: ParsedEmail, eml_path: str) -> int:
@@ -114,13 +127,8 @@ def ingest_from_pop3() -> dict[str, Any]:
         client.pass_(settings.pop3_pass)
 
         _, uidl_lines, _ = client.uidl()
-        uidl_pairs = []
-        for line in uidl_lines[-settings.pop3_max_messages_per_run :]:
-            parts = line.decode('utf-8', errors='replace').split()
-            if len(parts) == 2 and parts[0].isdigit():
-                uidl_pairs.append((int(parts[0]), parts[1]))
+        uidl_pairs = parse_uidl_lines(uidl_lines, settings.pop3_max_messages_per_run)
 
-        uidl_pairs.sort(key=lambda item: item[0])
         for msg_num, uidl in uidl_pairs:
             result['fetched'] += 1
             with get_conn() as conn:
@@ -132,8 +140,11 @@ def ingest_from_pop3() -> dict[str, Any]:
             try:
                 _, lines, _ = client.retr(msg_num)
                 raw_bytes = b'\r\n'.join(lines)
+
+                # Always keep raw source first.
+                eml_path = _save_eml(raw_bytes)
+
                 parsed = parse_eml_bytes(raw_bytes)
-                eml_path = _save_eml(raw_bytes, parsed.sent_at)
                 message_row_id = _insert_message(uidl, parsed, str(eml_path))
                 _insert_attachments(message_row_id, parsed)
                 result['stored'] += 1
@@ -143,6 +154,7 @@ def ingest_from_pop3() -> dict[str, Any]:
             except sqlite3.IntegrityError:
                 result['skipped'] += 1
             except Exception as exc:
+                logger.exception('Failed to process message %s (UIDL=%s)', msg_num, uidl)
                 result['errors'].append(f'#{msg_num} {exc}')
 
         return result
@@ -151,4 +163,4 @@ def ingest_from_pop3() -> dict[str, Any]:
             try:
                 client.quit()
             except Exception:
-                pass
+                logger.warning('POP3 client quit failed', exc_info=True)

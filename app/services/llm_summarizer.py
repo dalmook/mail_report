@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any
 
 import requests
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMDisabledError(RuntimeError):
@@ -33,6 +36,17 @@ class LLMService:
             'Accept': 'application/json',
             'Content-Type': 'application/json',
         }
+
+    @staticmethod
+    def parse_response_content(content: str) -> dict[str, Any]:
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            start = content.find('{')
+            end = content.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                return json.loads(content[start : end + 1])
+            raise
 
     def summarize_mail(self, subject: str, body_text: str) -> dict[str, Any]:
         if not self.enabled:
@@ -80,12 +94,5 @@ class LLMService:
         response.raise_for_status()
         data = response.json()
         content = data['choices'][0]['message']['content']
-
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            start = content.find('{')
-            end = content.rfind('}')
-            if start != -1 and end != -1 and end > start:
-                return json.loads(content[start : end + 1])
-            raise
+        logger.info('Received LLM summary response payload')
+        return self.parse_response_content(content)
