@@ -152,8 +152,8 @@ def list_messages(
     params: list[Any] = []
     if q:
         like = f'%{q}%'
-        sql += ' AND (m.subject LIKE ? OR m.body_preview LIKE ? OR m.text_body LIKE ?)'
-        params.extend([like, like, like])
+        sql += ' AND (m.subject LIKE ? OR m.body_preview LIKE ? OR m.text_body LIKE ? OR COALESCE(s.summary_short,"") LIKE ? OR COALESCE(s.tags_json,"") LIKE ? OR COALESCE(s.category,"") LIKE ? OR m.from_email LIKE ?)'
+        params.extend([like, like, like, like, like, like, like])
     if sender:
         sql += ' AND m.from_email LIKE ?'
         params.append(f'%{sender}%')
@@ -478,3 +478,109 @@ def list_message_issues(message_id: int) -> list[Any]:
 
 def tags_for_message(row: Any) -> list[str]:
     return _json_list(row['tags_json']) if row else []
+
+
+def upsert_issue_candidate(message_id: int) -> bool:
+    row = get_message(message_id)
+    if not row:
+        return False
+    reasons = []
+    score = 0.0
+    text = f"{row['subject'] or ''} {row['body_preview'] or ''} {row['summary_short'] or ''}".lower()
+    if any(k in text for k in ['마감', 'due', 'deadline']):
+        reasons.append('마감일 언급')
+        score += 0.3
+    if any(k in text for k in ['요청', 'please', 'action']):
+        reasons.append('요청사항 포함')
+        score += 0.2
+    if any(k in text for k in ['리스크', '장애', '지연', '이슈']):
+        reasons.append('리스크/장애/지연 키워드')
+        score += 0.35
+    if row['has_attachment'] and (row['importance_score'] or 0) >= 70:
+        reasons.append('중요 첨부 포함')
+        score += 0.15
+    if len(get_thread(message_id)) >= 4:
+        reasons.append('긴 스레드')
+        score += 0.15
+    if not reasons:
+        return False
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO issue_candidates(message_id, candidate_score, reasons_json, status)
+            VALUES (?, ?, ?, 'PENDING')
+            ON CONFLICT(message_id) DO UPDATE SET
+                candidate_score=excluded.candidate_score,
+                reasons_json=excluded.reasons_json,
+                status=CASE WHEN issue_candidates.status='CONVERTED' THEN issue_candidates.status ELSE 'PENDING' END
+            """,
+            (message_id, min(score, 1.0), json.dumps(reasons, ensure_ascii=False)),
+        )
+    return True
+
+
+def list_issue_candidates(status: str = 'PENDING', limit: int = 100) -> list[Any]:
+    with get_conn() as conn:
+        return conn.execute(
+            '''
+            SELECT c.*, m.subject, m.from_email, m.sent_at
+            FROM issue_candidates c JOIN messages m ON m.id = c.message_id
+            WHERE (?='' OR c.status = ?)
+            ORDER BY c.candidate_score DESC, c.id DESC
+            LIMIT ?
+            ''',
+            (status, status, limit),
+        ).fetchall()
+
+
+def mark_issue_candidate(message_id: int, status: str, reviewed_by: str = '') -> None:
+    with get_conn() as conn:
+        conn.execute(
+            'UPDATE issue_candidates SET status=?, reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP WHERE message_id=?',
+            (status, reviewed_by, message_id),
+        )
+
+
+def monitoring_stats() -> dict[str, Any]:
+    with get_conn() as conn:
+        last_ingest = conn.execute("SELECT finished_at FROM jobs WHERE job_type='pop3_ingest' AND status='success' ORDER BY id DESC LIMIT 1").fetchone()
+        last_summary = conn.execute("SELECT finished_at FROM jobs WHERE job_type IN ('llm_summary','llm_resummary','llm_resummary_batch') AND status='success' ORDER BY id DESC LIMIT 1").fetchone()
+        fail_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE status='failed' AND datetime(started_at) >= datetime('now','-7 day')").fetchone()[0]
+        retry_waiting = conn.execute("SELECT COUNT(*) FROM summaries WHERE retry_count > 0 AND tags_json LIKE '%요약실패%'").fetchone()[0]
+        unsummarized = conn.execute('SELECT COUNT(*) FROM messages m LEFT JOIN summaries s ON s.message_id = m.id WHERE s.id IS NULL').fetchone()[0]
+        summary_failed = conn.execute("SELECT COUNT(*) FROM summaries WHERE tags_json LIKE '%요약실패%'").fetchone()[0]
+        auto_tag_pending = conn.execute("SELECT COUNT(*) FROM issue_candidates WHERE status='PENDING'").fetchone()[0]
+        issue_candidate_pending = auto_tag_pending
+        last_failed = conn.execute("SELECT message FROM jobs WHERE status='failed' ORDER BY id DESC LIMIT 1").fetchone()
+        pipeline_runs = conn.execute('SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT 20').fetchall()
+
+    return {
+        'last_ingest': last_ingest['finished_at'] if last_ingest else None,
+        'last_summary': last_summary['finished_at'] if last_summary else None,
+        'fail_count': fail_count,
+        'retry_waiting': retry_waiting,
+        'unsummarized': unsummarized,
+        'summary_failed': summary_failed,
+        'auto_tag_pending': auto_tag_pending,
+        'issue_candidate_pending': issue_candidate_pending,
+        'last_failed_message': last_failed['message'] if last_failed else '',
+        'pipeline_runs': pipeline_runs,
+    }
+
+
+def storage_consistency_check(limit: int = 200) -> dict[str, int]:
+    missing_eml = 0
+    missing_attachment = 0
+    checked = 0
+    from pathlib import Path
+
+    with get_conn() as conn:
+        for row in conn.execute('SELECT eml_path FROM messages ORDER BY id DESC LIMIT ?', (limit,)).fetchall():
+            checked += 1
+            if row['eml_path'] and not Path(row['eml_path']).exists():
+                missing_eml += 1
+        for row in conn.execute('SELECT file_path FROM attachments ORDER BY id DESC LIMIT ?', (limit,)).fetchall():
+            if row['file_path'] and not Path(row['file_path']).exists():
+                missing_attachment += 1
+    return {'checked': checked, 'missing_eml': missing_eml, 'missing_attachment': missing_attachment}

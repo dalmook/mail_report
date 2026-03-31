@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <div class="row between center wrap gap12">
+    <h2>운영 상태 패널</h2>
+    <form method="post" action="/actions/run-pipeline" class="inline">
+      <input type="hidden" name="source" value="admin" />
+      <button class="btn primary" type="submit">전체 파이프라인 실행</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid cols-4 gap16">
+  <div class="card stat"><div class="label">마지막 수집</div><div class="value small">{{ mon.last_ingest or '-' }}</div></div>
+  <div class="card stat"><div class="label">마지막 요약</div><div class="value small">{{ mon.last_summary or '-' }}</div></div>
+  <div class="card stat warn"><div class="label">실패 건수(7일)</div><div class="value">{{ mon.fail_count }}</div></div>
+  <div class="card stat"><div class="label">재시도 대기</div><div class="value">{{ mon.retry_waiting }}</div></div>
+  <div class="card stat"><div class="label">미요약 메일</div><div class="value">{{ mon.unsummarized }}</div></div>
+  <div class="card stat"><div class="label">요약 실패 메일</div><div class="value">{{ mon.summary_failed }}</div></div>
+  <div class="card stat"><div class="label">자동태깅 보류</div><div class="value">{{ mon.auto_tag_pending }}</div></div>
+  <div class="card stat"><div class="label">이슈 후보 미검토</div><div class="value">{{ mon.issue_candidate_pending }}</div></div>
+</section>
+
+<section class="card">
+  <h3>최근 오류</h3>
+  <p class="muted">{{ mon.last_failed_message or '최근 오류 없음' }}</p>
+</section>
+
+
+<section class="card">
+  <h3>스토리지/DB 진단</h3>
+  <p class="muted">검사 대상 {{ diag.checked }}건 / 누락 EML {{ diag.missing_eml }}건 / 누락 첨부 {{ diag.missing_attachment }}건</p>
+</section>
+
+<section class="card">
+  <h3>이슈 후보 검토</h3>
+  <form method="get" class="row gap12 wrap">
+    <select name="candidate_status">{% for s in ['PENDING','REVIEWED','REJECTED','CONVERTED'] %}<option value="{{ s }}" {% if candidate_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    <button class="btn" type="submit">조회</button>
+  </form>
+  <table class="table compact">
+    <thead><tr><th>메일</th><th>점수</th><th>근거</th><th>처리</th></tr></thead>
+    <tbody>
+      {% for c in candidates %}
+      <tr>
+        <td><a href="/messages/{{ c.message_id }}">{{ c.subject }}</a><div class="muted small">{{ c.from_email }}</div></td>
+        <td>{{ '%.2f'|format(c.candidate_score) }}</td>
+        <td>{{ c.reasons_json }}</td>
+        <td>
+          <form method="post" action="/actions/candidate/{{ c.message_id }}" class="inline">
+            <input type="hidden" name="reviewed_by" value="admin" />
+            <select name="status">{% for s in ['PENDING','REVIEWED','REJECTED','CONVERTED'] %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select>
+            <button class="btn" type="submit">저장</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="4" class="muted">후보 없음</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>파이프라인 실행 이력</h3>
+  <table class="table compact">
+    <thead><tr><th>ID</th><th>타입</th><th>상태</th><th>시작</th><th>종료</th><th>오류</th></tr></thead>
+    <tbody>
+      {% for run in mon.pipeline_runs %}<tr><td>{{ run.id }}</td><td>{{ run.run_type }}</td><td>{{ run.status }}</td><td>{{ run.started_at }}</td><td>{{ run.finished_at or '-' }}</td><td>{{ run.error_message or '-' }}</td></tr>{% else %}<tr><td colspan="6" class="muted">이력 없음</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

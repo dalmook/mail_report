@@ -15,10 +15,13 @@ from ..services.repository import (
     get_related_messages,
     get_summary_history,
     get_thread,
+    list_issue_candidates,
     list_issue_events,
     list_issues,
     list_message_issues,
     list_messages,
+    monitoring_stats,
+    storage_consistency_check,
     tags_for_message,
 )
 
@@ -31,12 +34,32 @@ def build_router(templates: Jinja2Templates) -> APIRouter:
         stats = dashboard_stats()
         return templates.TemplateResponse('dashboard.html', {'request': request, 'stats': stats})
 
+    @router.get('/admin/ops', response_class=HTMLResponse)
+    def admin_ops(request: Request, candidate_status: str = 'PENDING'):
+        mon = monitoring_stats()
+        candidates = list_issue_candidates(status=candidate_status, limit=80)
+        diag = storage_consistency_check()
+        return templates.TemplateResponse('ops_admin.html', {'request': request, 'mon': mon, 'candidates': candidates, 'candidate_status': candidate_status, 'diag': diag})
+
     @router.get('/messages', response_class=HTMLResponse)
     def messages_page(
-        request: Request, q: str = '', sender: str = '', date_from: str = '', date_to: str = '', category: str = '',
+        request: Request,
+        q: str = '', sender: str = '', date_from: str = '', date_to: str = '', category: str = '',
         has_summary: str = '', status: str = '', tag: str = '', has_attachment: str = '', importance_min: int | None = None,
-        importance_max: int | None = None, sort: str = 'latest',
+        importance_max: int | None = None, sort: str = 'latest', quick: str = '',
     ):
+        if quick == 'today_important':
+            date_from = '2000-01-01'
+            importance_min = 70
+            sort = 'importance_desc'
+        elif quick == 'summary_failed':
+            sort = 'summary_failed_desc'
+        elif quick == 'risk':
+            category = '운영'
+            importance_min = 70
+        elif quick == 'issue_candidate':
+            tag = '리스크'
+
         rows = list_messages(
             q=q, sender=sender, date_from=date_from, date_to=date_to, category=category, has_summary=has_summary,
             status=status, tag=tag, has_attachment=has_attachment, importance_min=importance_min,
@@ -47,7 +70,7 @@ def build_router(templates: Jinja2Templates) -> APIRouter:
             'date_to': date_to, 'category': category, 'has_summary': has_summary, 'status': status,
             'tag': tag, 'has_attachment': has_attachment,
             'importance_min': importance_min if importance_min is not None else '',
-            'importance_max': importance_max if importance_max is not None else '', 'sort': sort,
+            'importance_max': importance_max if importance_max is not None else '', 'sort': sort, 'quick': quick,
         })
 
     @router.get('/messages/{message_id}', response_class=HTMLResponse)

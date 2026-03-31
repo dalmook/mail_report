@@ -6,6 +6,7 @@ from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 
 from ..db import create_job, finish_job, get_conn
+from ..services.pipeline import PipelineService
 from ..services.pop3_ingest import ingest_from_pop3
 from ..services.repository import (
     add_issue_link,
@@ -15,13 +16,16 @@ from ..services.repository import (
     delete_link,
     get_message,
     insert_link,
+    list_issue_candidates,
     list_summary_failed_message_ids,
+    mark_issue_candidate,
     remove_tag,
     save_period_llm_summary,
     toggle_message_important,
     update_issue,
     update_link,
     update_message_status,
+    upsert_issue_candidate,
 )
 from ..services.summary_service import SummaryService
 
@@ -29,6 +33,14 @@ from ..services.summary_service import SummaryService
 def build_router(summary_service: SummaryService | None = None) -> APIRouter:
     router = APIRouter()
     summary_service = summary_service or SummaryService()
+    pipeline_service = PipelineService(summary_service)
+
+    @router.post('/actions/run-pipeline')
+    def action_run_pipeline(source: str = Form('manual')):
+        job_id = create_job('full_pipeline', 'running', 'Manual full pipeline started')
+        result = pipeline_service.run_full_pipeline(source=source)
+        finish_job(job_id, 'success', 'Manual full pipeline finished', result)
+        return RedirectResponse('/admin/ops', status_code=303)
 
     @router.post('/actions/ingest')
     def action_ingest():
@@ -45,6 +57,7 @@ def build_router(summary_service: SummaryService | None = None) -> APIRouter:
         job_id = create_job('llm_summary', 'running', f'Summarize message #{message_id}')
         try:
             result = summary_service.summarize_message(message_id)
+            upsert_issue_candidate(message_id)
             finish_job(job_id, 'success' if result['ok'] else 'failed', 'Summary processed', result)
         except Exception as exc:
             finish_job(job_id, 'failed', f'Summary failed: {exc}', {'message_id': message_id, 'error': str(exc)})
@@ -55,6 +68,7 @@ def build_router(summary_service: SummaryService | None = None) -> APIRouter:
         job_id = create_job('llm_resummary', 'running', f'Re-summarize message #{message_id}')
         try:
             result = summary_service.summarize_message(message_id, force=True)
+            upsert_issue_candidate(message_id)
             finish_job(job_id, 'success' if result['ok'] else 'failed', 'Re-summary processed', result)
         except Exception as exc:
             finish_job(job_id, 'failed', f'Re-summary failed: {exc}', {'message_id': message_id, 'error': str(exc)})
@@ -67,12 +81,18 @@ def build_router(summary_service: SummaryService | None = None) -> APIRouter:
         processed, failed = 0, 0
         for message_id in message_ids:
             result = summary_service.summarize_message(message_id, force=True)
+            upsert_issue_candidate(message_id)
             if result['ok']:
                 processed += 1
             else:
                 failed += 1
         finish_job(job_id, 'success', 'Batch re-summary finished', {'processed': processed, 'failed': failed, 'targets': len(message_ids)})
         return RedirectResponse('/', status_code=303)
+
+    @router.post('/actions/candidate/{message_id}')
+    def action_candidate_review(message_id: int, status: str = Form('PENDING'), reviewed_by: str = Form('operator')):
+        mark_issue_candidate(message_id, status=status, reviewed_by=reviewed_by)
+        return RedirectResponse('/admin/ops', status_code=303)
 
     @router.post('/actions/add-link/{message_id}')
     def action_add_link(message_id: int, title: str = Form(...), url: str = Form(...), link_type: str = Form('manual')):
@@ -110,28 +130,13 @@ def build_router(summary_service: SummaryService | None = None) -> APIRouter:
         return RedirectResponse(f'/messages/{message_id}', status_code=303)
 
     @router.post('/actions/create-issue/{message_id}')
-    def action_create_issue(
-        message_id: int,
-        title: str = Form(...),
-        owner: str = Form(''),
-        due_date: str = Form(''),
-        priority: str = Form('MEDIUM'),
-        summary: str = Form(''),
-        next_action: str = Form(''),
-    ):
+    def action_create_issue(message_id: int, title: str = Form(...), owner: str = Form(''), due_date: str = Form(''), priority: str = Form('MEDIUM'), summary: str = Form(''), next_action: str = Form('')):
         issue_id = create_issue_from_message(message_id, title, owner=owner, due_date=due_date, priority=priority, summary=summary, next_action=next_action)
+        mark_issue_candidate(message_id, 'CONVERTED', reviewed_by=owner or 'operator')
         return RedirectResponse(f'/issues/{issue_id}', status_code=303)
 
     @router.post('/actions/update-issue/{issue_id}')
-    def action_update_issue(
-        issue_id: int,
-        status: str = Form(...),
-        owner: str = Form(''),
-        due_date: str = Form(''),
-        priority: str = Form('MEDIUM'),
-        summary: str = Form(''),
-        next_action: str = Form(''),
-    ):
+    def action_update_issue(issue_id: int, status: str = Form(...), owner: str = Form(''), due_date: str = Form(''), priority: str = Form('MEDIUM'), summary: str = Form(''), next_action: str = Form('')):
         update_issue(issue_id, status=status, owner=owner, due_date=due_date, priority=priority, summary=summary, next_action=next_action)
         return RedirectResponse(f'/issues/{issue_id}', status_code=303)
 
@@ -144,7 +149,6 @@ def build_router(summary_service: SummaryService | None = None) -> APIRouter:
     def action_generate_report(period_type: str = Form('week')):
         job_id = create_job('period_report', 'running', f'Generate {period_type} report')
         summary = build_period_summary(period_type=period_type)
-        # placeholder for future LLM period summary integration
         text = f"{period_type} 보고: 수집 {summary['period_count']}건, 중요 {summary['important_count']}건, 리스크 {summary['risk_count']}건"
         save_period_llm_summary(summary['period_type'], summary['period_key'], text)
         finish_job(job_id, 'success', 'Period report generated', summary)

@@ -94,6 +94,7 @@ def init_db() -> None:
                 status TEXT DEFAULT 'new',
                 tags_json TEXT,
                 tag_reasons_json TEXT,
+                confidence_score REAL DEFAULT 0.0,
                 importance_score INTEGER,
                 retry_count INTEGER DEFAULT 0,
                 raw_response TEXT,
@@ -154,6 +155,18 @@ def init_db() -> None:
                 FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS issue_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL UNIQUE,
+                candidate_score REAL DEFAULT 0.0,
+                reasons_json TEXT,
+                status TEXT DEFAULT 'PENDING',
+                reviewed_by TEXT,
+                reviewed_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS issue_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 issue_id INTEGER NOT NULL,
@@ -171,6 +184,18 @@ def init_db() -> None:
                 llm_summary TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(period_type, period_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS pipeline_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT,
+                last_success_at TEXT,
+                last_failure_at TEXT,
+                error_message TEXT,
+                detail_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS jobs (
@@ -198,6 +223,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
             CREATE INDEX IF NOT EXISTS idx_issues_due_date ON issues(due_date);
             CREATE INDEX IF NOT EXISTS idx_issue_events_issue_id ON issue_events(issue_id);
+            CREATE INDEX IF NOT EXISTS idx_issue_candidates_status ON issue_candidates(status);
+            CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
             '''
         )
 
@@ -209,6 +236,7 @@ def init_db() -> None:
         _ensure_column(conn, 'summaries', 'status', "status TEXT DEFAULT 'new'")
         _ensure_column(conn, 'summaries', 'tags_json', 'tags_json TEXT')
         _ensure_column(conn, 'summaries', 'tag_reasons_json', 'tag_reasons_json TEXT')
+        _ensure_column(conn, 'summaries', 'confidence_score', 'confidence_score REAL DEFAULT 0.0')
         _ensure_column(conn, 'summaries', 'retry_count', 'retry_count INTEGER DEFAULT 0')
         _ensure_column(conn, 'summaries', 'entities_people_json', 'entities_people_json TEXT')
         _ensure_column(conn, 'summaries', 'entities_orgs_json', 'entities_orgs_json TEXT')
@@ -218,20 +246,10 @@ def init_db() -> None:
 
 def create_job(job_type: str, status: str = 'running', message: str = '', detail: dict[str, Any] | None = None) -> int:
     with get_conn() as conn:
-        cur = conn.execute(
-            'INSERT INTO jobs(job_type, status, message, detail_json) VALUES (?, ?, ?, ?)',
-            (job_type, status, message, json.dumps(detail or {}, ensure_ascii=False)),
-        )
+        cur = conn.execute('INSERT INTO jobs(job_type, status, message, detail_json) VALUES (?, ?, ?, ?)', (job_type, status, message, json.dumps(detail or {}, ensure_ascii=False)))
         return int(cur.lastrowid)
 
 
 def finish_job(job_id: int, status: str, message: str = '', detail: dict[str, Any] | None = None) -> None:
     with get_conn() as conn:
-        conn.execute(
-            '''
-            UPDATE jobs
-            SET status = ?, finished_at = CURRENT_TIMESTAMP, message = ?, detail_json = ?
-            WHERE id = ?
-            ''',
-            (status, message, json.dumps(detail or {}, ensure_ascii=False), job_id),
-        )
+        conn.execute('UPDATE jobs SET status = ?, finished_at = CURRENT_TIMESTAMP, message = ?, detail_json = ? WHERE id = ?', (status, message, json.dumps(detail or {}, ensure_ascii=False), job_id))
