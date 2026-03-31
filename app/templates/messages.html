@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>메일 목록</h2>
+  <form method="get" class="filters row wrap gap12">
+    <input type="text" name="q" value="{{ q }}" placeholder="제목/발신자/본문 검색" />
+    <input type="text" name="category" value="{{ category }}" placeholder="카테고리" />
+    <select name="has_summary">
+      <option value="" {% if not has_summary %}selected{% endif %}>요약 전체</option>
+      <option value="Y" {% if has_summary == 'Y' %}selected{% endif %}>요약 완료</option>
+      <option value="N" {% if has_summary == 'N' %}selected{% endif %}>요약 미완료</option>
+    </select>
+    <button class="btn primary" type="submit">조회</button>
+  </form>
+</section>
+
+<section class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>일시</th>
+        <th>제목</th>
+        <th>발신자</th>
+        <th>한줄 요약</th>
+        <th>카테고리</th>
+        <th>점수</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.sent_at or '-' }}</td>
+        <td><a href="/messages/{{ row.id }}">{{ row.subject }}</a></td>
+        <td>{{ row.from_email or '-' }}</td>
+        <td>{{ row.summary_short or row.body_preview or '-' }}</td>
+        <td>{{ row.category or '-' }}</td>
+        <td>{{ row.importance_score or '-' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">검색 결과가 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

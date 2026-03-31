@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <div class="row between center wrap gap16">
+    <div>
+      <h2>{{ row.subject }}</h2>
+      <p class="muted">{{ row.from_name or '' }} {{ row.from_email or '' }}</p>
+      <p class="muted">발신: {{ row.sent_at or '-' }} / 수신기록: {{ row.received_at or '-' }}</p>
+    </div>
+    <div class="row gap12 wrap">
+      <a class="btn" href="/download/eml/{{ row.id }}">EML 다운로드</a>
+      <form method="post" action="/actions/summarize/{{ row.id }}">
+        <button class="btn primary" type="submit">LLM 요약 실행</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="grid cols-2 gap16 two-col">
+  <div class="card">
+    <h3>요약</h3>
+    <p>{{ row.summary_short or '아직 요약이 없습니다.' }}</p>
+    <hr />
+    <p class="preline">{{ row.summary_long or '-' }}</p>
+  </div>
+
+  <div class="card">
+    <h3>분류</h3>
+    <p><strong>카테고리:</strong> {{ row.category or '-' }}</p>
+    <p><strong>중요도:</strong> {{ row.importance_score or '-' }}</p>
+
+    <h4>키워드</h4>
+    <div class="chips">
+      {% for item in keywords %}<span class="chip">{{ item }}</span>{% else %}<span class="muted">없음</span>{% endfor %}
+    </div>
+
+    <h4>리스크</h4>
+    <ul>
+      {% for item in risks %}<li>{{ item }}</li>{% else %}<li class="muted">없음</li>{% endfor %}
+    </ul>
+
+    <h4>액션아이템</h4>
+    <ul>
+      {% for item in action_items %}<li>{{ item }}</li>{% else %}<li class="muted">없음</li>{% endfor %}
+    </ul>
+  </div>
+</section>
+
+<section class="grid cols-2 gap16 two-col">
+  <div class="card">
+    <h3>첨부파일</h3>
+    <ul>
+      {% for file in attachments %}
+        <li><a href="/download/attachment/{{ file.id }}">{{ file.filename }}</a> ({{ file.content_type }}, {{ file.file_size }} bytes)</li>
+      {% else %}
+        <li class="muted">첨부 없음</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>관련 링크</h3>
+    <form method="post" action="/actions/add-link/{{ row.id }}" class="stack gap12">
+      <input type="text" name="title" placeholder="링크 제목" required />
+      <input type="url" name="url" placeholder="https://..." required />
+      <input type="text" name="link_type" placeholder="manual / confluence / jira / drive" value="manual" />
+      <button class="btn primary" type="submit">링크 추가</button>
+    </form>
+    <hr />
+    <ul>
+      {% for link in links %}
+        <li>[{{ link.link_type }}] <a href="{{ link.url }}" target="_blank">{{ link.title }}</a></li>
+      {% else %}
+        <li class="muted">등록된 링크 없음</li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+
+<section class="card">
+  <h3>스레드</h3>
+  <ul>
+    {% for item in thread_rows %}
+      <li><a href="/messages/{{ item.id }}">{{ item.subject }}</a> - {{ item.from_email }} - {{ item.sent_at or '-' }}</li>
+    {% else %}
+      <li class="muted">스레드 정보 없음</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h3>본문 미리보기</h3>
+  <div class="mail-body preline">{{ row.text_body or row.body_preview or '-' }}</div>
+</section>
+{% endblock %}
